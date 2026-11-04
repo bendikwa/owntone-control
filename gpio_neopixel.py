@@ -16,7 +16,7 @@ from typing import Sequence
 
 INPUT_PINS = (17, 27, 22, 23)
 PIXEL_COUNT = 5
-POLL_INTERVAL = 0.1
+POLL_INTERVAL = 1
 COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 LOGGER = logging.getLogger("gpio_neopixel")
 
