@@ -1,8 +1,18 @@
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from gpio_neopixel import PixelConfig, StateService, parse_pixel_config, scaled_color
+from gpio_neopixel import (
+    INPUT_PINS,
+    PixelConfig,
+    StateService,
+    parse_pixel_config,
+    run_service,
+    scaled_color,
+)
 
 
 class FakeButton:
@@ -92,6 +102,60 @@ class StateServiceTests(unittest.TestCase):
 
             self.assertEqual(strip.colors[3], (128, 64, 0))
             self.assertEqual(strip.colors[0], (0, 0, 0))
+
+
+class RunServiceTests(unittest.TestCase):
+    def test_buttons_use_lgpio_factory(self):
+        created_buttons = []
+        created_factories = []
+
+        class FakeFactory:
+            def __init__(self):
+                self.closed = False
+                created_factories.append(self)
+
+            def close(self):
+                self.closed = True
+
+        class FakeButton:
+            def __init__(self, pin, pull_up, pin_factory):
+                created_buttons.append((pin, pull_up, pin_factory))
+
+            def close(self):
+                pass
+
+        class TestStrip(FakeStrip):
+            def begin(self):
+                pass
+
+        gpiozero = types.ModuleType("gpiozero")
+        gpiozero.Button = FakeButton
+        gpiozero_lgpio = types.ModuleType("gpiozero.pins.lgpio")
+        gpiozero_lgpio.LGPIOFactory = FakeFactory
+        ws281x = types.ModuleType("rpi_ws281x")
+        ws281x.Color = color
+        ws281x.PixelStrip = lambda *args, **kwargs: TestStrip()
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "gpiozero": gpiozero,
+                    "gpiozero.pins.lgpio": gpiozero_lgpio,
+                    "rpi_ws281x": ws281x,
+                },
+            ),
+            patch.object(StateService, "run", side_effect=KeyboardInterrupt),
+            patch.object(StateService, "turn_off_pixels"),
+        ):
+            run_service(Path("."))
+
+        self.assertEqual([pin for pin, _, _ in created_buttons], list(INPUT_PINS))
+        self.assertTrue(all(pull_up for _, pull_up, _ in created_buttons))
+        self.assertTrue(
+            all(factory is created_factories[0] for _, _, factory in created_buttons)
+        )
+        self.assertTrue(created_factories[0].closed)
 
 
 if __name__ == "__main__":

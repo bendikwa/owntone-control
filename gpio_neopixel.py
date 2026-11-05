@@ -139,10 +139,12 @@ _UNREAD = object()
 def run_service(state_dir: Path) -> None:
     try:
         from gpiozero import Button
+        from gpiozero.pins.lgpio import LGPIOFactory
         from rpi_ws281x import Color, PixelStrip
     except ImportError as error:
         raise RuntimeError(
-            "Install gpiozero and rpi_ws281x before running on the Raspberry Pi"
+            "Install gpiozero, lgpio, and rpi_ws281x before running "
+            "on the Raspberry Pi"
         ) from error
 
     strip = PixelStrip(
@@ -155,16 +157,22 @@ def run_service(state_dir: Path) -> None:
         channel=0,
     )
     strip.begin()
-    buttons = [Button(pin, pull_up=True) for pin in INPUT_PINS]
-    service = StateService(state_dir, buttons, strip, Color)
+    pin_factory = LGPIOFactory()
+    buttons = []
+    service = None
     try:
+        for pin in INPUT_PINS:
+            buttons.append(Button(pin, pull_up=True, pin_factory=pin_factory))
+        service = StateService(state_dir, buttons, strip, Color)
         service.run()
     except KeyboardInterrupt:
         LOGGER.info("Stopping")
     finally:
-        service.turn_off_pixels()
+        if service is not None:
+            service.turn_off_pixels()
         for button in buttons:
             button.close()
+        pin_factory.close()
 
 
 def main() -> None:

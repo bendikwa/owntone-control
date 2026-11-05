@@ -63,10 +63,12 @@ On Raspberry Pi OS, install the hardware libraries (package availability may
 depend on your OS release):
 
 ```sh
-sudo apt install python3-gpiozero python3-rpi-ws281x
+sudo apt install python3-gpiozero python3-lgpio python3-rpi-ws281x
 sudo python3 gpio_neopixel.py --state-dir /var/lib/gpio-neopixel
 ```
 
+The service uses gpiozero's `lgpio` pin factory for switch inputs; installing
+`RPi.GPIO` alone does not provide that backend.
 Run with the permissions required by your OS's WS281x driver. Stop with
 Ctrl+C; the service turns all pixels off on shutdown.
 
