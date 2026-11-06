@@ -136,14 +136,23 @@ class StateService:
 _UNREAD = object()
 
 
+class _GPIOInput:
+    def __init__(self, gpio: object, pin: int) -> None:
+        self._gpio = gpio
+        self._pin = pin
+
+    @property
+    def is_pressed(self) -> bool:
+        return self._gpio.input(self._pin) == self._gpio.LOW
+
+
 def run_service(state_dir: Path) -> None:
     try:
-        from gpiozero import Button
-        from gpiozero.pins.lgpio import LGPIOFactory
+        import RPi.GPIO as GPIO
         from rpi_ws281x import Color, PixelStrip
     except ImportError as error:
         raise RuntimeError(
-            "Install gpiozero, lgpio, and rpi_ws281x before running "
+            "Install RPi.GPIO and rpi_ws281x before running "
             "on the Raspberry Pi"
         ) from error
 
@@ -157,22 +166,20 @@ def run_service(state_dir: Path) -> None:
         channel=0,
     )
     strip.begin()
-    pin_factory = LGPIOFactory()
-    buttons = []
-    service = None
+    buttons = [_GPIOInput(GPIO, pin) for pin in INPUT_PINS]
+    service = StateService(state_dir, buttons, strip, Color)
     try:
+        GPIO.setmode(GPIO.BCM)
         for pin in INPUT_PINS:
-            buttons.append(Button(pin, pull_up=True, pin_factory=pin_factory))
-        service = StateService(state_dir, buttons, strip, Color)
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         service.run()
     except KeyboardInterrupt:
         LOGGER.info("Stopping")
     finally:
-        if service is not None:
+        try:
             service.turn_off_pixels()
-        for button in buttons:
-            button.close()
-        pin_factory.close()
+        finally:
+            GPIO.cleanup(INPUT_PINS)
 
 
 def main() -> None:

@@ -9,6 +9,7 @@ from gpio_neopixel import (
     INPUT_PINS,
     PixelConfig,
     StateService,
+    _GPIOInput,
     parse_pixel_config,
     run_service,
     scaled_color,
@@ -34,6 +35,25 @@ class FakeStrip:
 
 def color(red, green, blue):
     return red, green, blue
+
+
+class GPIOInputTests(unittest.TestCase):
+    def test_low_is_pressed_and_high_is_released(self):
+        class FakeGPIO:
+            LOW = 0
+
+            def __init__(self):
+                self.value = self.LOW
+
+            def input(self, pin):
+                return self.value
+
+        gpio = FakeGPIO()
+        button = _GPIOInput(gpio, 17)
+
+        self.assertTrue(button.is_pressed)
+        gpio.value = 1
+        self.assertFalse(button.is_pressed)
 
 
 class PixelConfigTests(unittest.TestCase):
@@ -105,33 +125,27 @@ class StateServiceTests(unittest.TestCase):
 
 
 class RunServiceTests(unittest.TestCase):
-    def test_buttons_use_lgpio_factory(self):
-        created_buttons = []
-        created_factories = []
-
-        class FakeFactory:
-            def __init__(self):
-                self.closed = False
-                created_factories.append(self)
-
-            def close(self):
-                self.closed = True
-
-        class FakeButton:
-            def __init__(self, pin, pull_up, pin_factory):
-                created_buttons.append((pin, pull_up, pin_factory))
-
-            def close(self):
-                pass
+    def test_switch_inputs_use_rpi_gpio_polling_and_cleanup(self):
+        setup_calls = []
+        cleanup_calls = []
 
         class TestStrip(FakeStrip):
             def begin(self):
                 pass
 
-        gpiozero = types.ModuleType("gpiozero")
-        gpiozero.Button = FakeButton
-        gpiozero_lgpio = types.ModuleType("gpiozero.pins.lgpio")
-        gpiozero_lgpio.LGPIOFactory = FakeFactory
+        gpio = types.ModuleType("RPi.GPIO")
+        gpio.BCM = "BCM"
+        gpio.IN = "IN"
+        gpio.PUD_UP = "PUD_UP"
+        gpio.LOW = 0
+        gpio.setmode = lambda mode: setup_calls.append(("mode", mode))
+        gpio.setup = lambda pin, mode, pull_up_down: setup_calls.append(
+            (pin, mode, pull_up_down)
+        )
+        gpio.input = lambda pin: gpio.LOW
+        gpio.cleanup = lambda pins: cleanup_calls.append(pins)
+        rpi = types.ModuleType("RPi")
+        rpi.GPIO = gpio
         ws281x = types.ModuleType("rpi_ws281x")
         ws281x.Color = color
         ws281x.PixelStrip = lambda *args, **kwargs: TestStrip()
@@ -140,8 +154,8 @@ class RunServiceTests(unittest.TestCase):
             patch.dict(
                 sys.modules,
                 {
-                    "gpiozero": gpiozero,
-                    "gpiozero.pins.lgpio": gpiozero_lgpio,
+                    "RPi": rpi,
+                    "RPi.GPIO": gpio,
                     "rpi_ws281x": ws281x,
                 },
             ),
@@ -150,12 +164,12 @@ class RunServiceTests(unittest.TestCase):
         ):
             run_service(Path("."))
 
-        self.assertEqual([pin for pin, _, _ in created_buttons], list(INPUT_PINS))
-        self.assertTrue(all(pull_up for _, pull_up, _ in created_buttons))
-        self.assertTrue(
-            all(factory is created_factories[0] for _, _, factory in created_buttons)
+        self.assertEqual(
+            setup_calls,
+            [("mode", gpio.BCM)]
+            + [(pin, gpio.IN, gpio.PUD_UP) for pin in INPUT_PINS],
         )
-        self.assertTrue(created_factories[0].closed)
+        self.assertEqual(cleanup_calls, [INPUT_PINS])
 
 
 if __name__ == "__main__":
