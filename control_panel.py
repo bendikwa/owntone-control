@@ -9,11 +9,13 @@ import logging
 import math
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Sequence
 
 
@@ -287,7 +289,12 @@ def run_service(state_dir: Path) -> None:
     strip.begin()
     buttons = [_GPIOInput(GPIO, pin) for pin in INPUT_PINS]
     service = StateService(state_dir, buttons, strip, Color)
+
+    def handle_sigterm(_signum: int, _frame: FrameType | None) -> None:
+        raise KeyboardInterrupt
+
     try:
+        signal.signal(signal.SIGTERM, handle_sigterm)
         GPIO.setmode(GPIO.BCM)
         for pin in INPUT_PINS:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)

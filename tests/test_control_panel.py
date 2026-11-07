@@ -1,3 +1,4 @@
+import signal
 import sys
 import tempfile
 import types
@@ -253,6 +254,8 @@ class RunServiceTests(unittest.TestCase):
     def test_switch_inputs_use_rpi_gpio_polling_and_cleanup(self):
         setup_calls = []
         cleanup_calls = []
+        signal_handlers = []
+        strips = []
 
         class TestStrip(FakeStrip):
             def begin(self):
@@ -273,7 +276,16 @@ class RunServiceTests(unittest.TestCase):
         rpi.GPIO = gpio
         ws281x = types.ModuleType("rpi_ws281x")
         ws281x.Color = color
-        ws281x.PixelStrip = lambda *args, **kwargs: TestStrip()
+
+        def create_strip(*args, **kwargs):
+            strip = TestStrip()
+            strips.append(strip)
+            return strip
+
+        ws281x.PixelStrip = create_strip
+
+        def request_sigterm():
+            signal_handlers[0](signal.SIGTERM, None)
 
         with (
             patch.dict(
@@ -284,11 +296,17 @@ class RunServiceTests(unittest.TestCase):
                     "rpi_ws281x": ws281x,
                 },
             ),
-            patch.object(StateService, "run", side_effect=KeyboardInterrupt),
-            patch.object(StateService, "turn_off_pixels"),
+            patch(
+                "control_panel.signal.signal",
+                side_effect=lambda _sig, handler: signal_handlers.append(handler),
+            ),
+            patch.object(StateService, "run", side_effect=request_sigterm),
         ):
             run_service(Path("."))
 
+        self.assertEqual(len(signal_handlers), 1)
+        self.assertEqual(strips[0].colors, {index: (0, 0, 0) for index in range(5)})
+        self.assertEqual(strips[0].show_count, 1)
         self.assertEqual(
             setup_calls,
             [("mode", gpio.BCM)]
