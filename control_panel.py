@@ -7,7 +7,10 @@ import argparse
 import json
 import logging
 import math
+import os
 import re
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +20,10 @@ from typing import Sequence
 INPUT_PINS = (17, 27, 22, 23)
 PIXEL_COUNT = 5
 POLL_INTERVAL = 1
+SYSTEM_PIXEL_BRIGHTNESS = 0.1
+SYSTEM_PIXEL_ORANGE = "#FFA500"
+SYSTEM_PIXEL_BLUE = "#000080"
+SYSTEM_PIXEL_RED = "#800000"
 COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 LOGGER = logging.getLogger("control_panel")
 
@@ -59,6 +66,58 @@ def scaled_color(config: PixelConfig) -> tuple[int, int, int]:
     if not config.on:
         return (0, 0, 0)
     return tuple(round(channel * config.brightness) for channel in config.color)
+
+
+def owntone_service_is_running() -> bool | None:
+    try:
+        result = subprocess.run(
+            ("systemctl", "is-active", "--quiet", "owntone.service"),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+    except subprocess.TimeoutExpired:
+        LOGGER.error("Timed out checking Owntone service status")
+        return None
+    except OSError as error:
+        LOGGER.error("Cannot check Owntone service status: %s", error)
+        return None
+
+    if result.returncode in (0, 3, 4):
+        return result.returncode == 0
+    LOGGER.error(
+        "Unexpected exit status %s while checking Owntone service",
+        result.returncode,
+    )
+    return None
+
+
+def wifi_is_connected(net_dir: Path = Path("/sys/class/net")) -> bool | None:
+    try:
+        wireless_interfaces = [
+            interface
+            for interface in net_dir.iterdir()
+            if (interface / "wireless").is_dir()
+        ]
+    except OSError as error:
+        LOGGER.error("Cannot inspect network interfaces for Wi-Fi status: %s", error)
+        return None
+
+    for interface in wireless_interfaces:
+        try:
+            carrier = (interface / "carrier").read_text(encoding="ascii").strip()
+        except OSError as error:
+            LOGGER.error("Cannot read Wi-Fi status for %s: %s", interface.name, error)
+            return None
+        if carrier == "1":
+            return True
+        if carrier != "0":
+            LOGGER.error(
+                "Unexpected Wi-Fi carrier status %r for %s", carrier, interface.name
+            )
+            return None
+    return False
 
 
 class StateService:
@@ -121,9 +180,59 @@ class StateService:
             )
             self.strip.show()
 
+    def sync_system_status(self) -> None:
+        owntone_running = owntone_service_is_running()
+        if owntone_running is None:
+            return
+
+        if not owntone_running:
+            on = True
+            color = SYSTEM_PIXEL_RED
+        else:
+            wifi_connected = wifi_is_connected()
+            if wifi_connected is None:
+                return
+            on = True
+            color = SYSTEM_PIXEL_ORANGE if wifi_connected else SYSTEM_PIXEL_BLUE
+
+        path = self.state_dir / "0.out"
+        content = json.dumps(
+            {
+                "on": on,
+                "color": color,
+                "brightness": SYSTEM_PIXEL_BRIGHTNESS,
+            },
+            separators=(",", ":"),
+        ) + "\n"
+        try:
+            if path.read_text(encoding="utf-8") == content:
+                return
+        except FileNotFoundError:
+            pass
+
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.state_dir,
+                prefix=".0.out.",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+
     def run(self) -> None:
         while True:
             self.sync_switch_files()
+            self.sync_system_status()
             self.sync_pixel_files()
             time.sleep(POLL_INTERVAL)
 

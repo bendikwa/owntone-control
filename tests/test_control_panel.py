@@ -10,9 +10,11 @@ from control_panel import (
     PixelConfig,
     StateService,
     _GPIOInput,
+    owntone_service_is_running,
     parse_pixel_config,
     run_service,
     scaled_color,
+    wifi_is_connected,
 )
 
 
@@ -35,6 +37,36 @@ class FakeStrip:
 
 def color(red, green, blue):
     return red, green, blue
+
+
+class SystemStatusDetectionTests(unittest.TestCase):
+    def test_owntone_service_status_uses_systemctl(self):
+        with patch(
+            "control_panel.subprocess.run",
+            return_value=types.SimpleNamespace(returncode=0),
+        ) as run:
+            self.assertTrue(owntone_service_is_running())
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ("systemctl", "is-active", "--quiet", "owntone.service"),
+        )
+
+    def test_wifi_status_uses_wireless_interface_carrier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            net_dir = Path(directory)
+            wireless = net_dir / "wlan0"
+            (wireless / "wireless").mkdir(parents=True)
+            (wireless / "carrier").write_text("1\n", encoding="ascii")
+
+            self.assertTrue(wifi_is_connected(net_dir))
+
+            (wireless / "carrier").write_text("0\n", encoding="ascii")
+            self.assertFalse(wifi_is_connected(net_dir))
+
+    def test_wifi_status_is_false_when_no_wireless_interface_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(wifi_is_connected(Path(directory)))
 
 
 class GPIOInputTests(unittest.TestCase):
@@ -122,6 +154,59 @@ class StateServiceTests(unittest.TestCase):
 
             self.assertEqual(strip.colors[3], (128, 64, 0))
             self.assertEqual(strip.colors[0], (0, 0, 0))
+
+    def test_system_pixel_is_orange_when_owntone_and_wifi_are_up(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            strip = FakeStrip()
+            service = StateService(state_dir, [FakeButton(False)] * 4, strip, color)
+
+            with (
+                patch("control_panel.owntone_service_is_running", return_value=True),
+                patch("control_panel.wifi_is_connected", return_value=True),
+            ):
+                service.sync_system_status()
+                service.sync_pixel_files()
+
+            self.assertEqual(
+                (state_dir / "0.out").read_text(encoding="utf-8"),
+                '{"on":true,"color":"#FFA500","brightness":0.1}\n',
+            )
+            self.assertEqual(strip.colors[0], (26, 16, 0))
+
+    def test_system_pixel_is_blue_when_owntone_is_up_but_wifi_is_down(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            strip = FakeStrip()
+            service = StateService(state_dir, [FakeButton(False)] * 4, strip, color)
+
+            with (
+                patch("control_panel.owntone_service_is_running", return_value=True),
+                patch("control_panel.wifi_is_connected", return_value=False),
+            ):
+                service.sync_system_status()
+                service.sync_pixel_files()
+
+            self.assertEqual(
+                (state_dir / "0.out").read_text(encoding="utf-8"),
+                '{"on":true,"color":"#000080","brightness":0.1}\n',
+            )
+            self.assertEqual(strip.colors[0], (0, 0, 13))
+
+    def test_system_pixel_is_red_when_owntone_is_not_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            service = StateService(
+                state_dir, [FakeButton(False)] * 4, FakeStrip(), color
+            )
+
+            with patch("control_panel.owntone_service_is_running", return_value=False):
+                service.sync_system_status()
+
+            self.assertEqual(
+                parse_pixel_config((state_dir / "0.out").read_text(encoding="utf-8")),
+                PixelConfig(True, (128, 0, 0), 0.1),
+            )
 
 
 class RunServiceTests(unittest.TestCase):
