@@ -1,0 +1,14 @@
+[Unit]
+Description=Owntone control-panel GPIO and NeoPixel service
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/control-panel
+ExecStart=/usr/bin/python3 /opt/control-panel/control_panel.py --state-dir /var/lib/control-panel
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

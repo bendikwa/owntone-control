@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gpio_neopixel import (
+from control_panel import (
     INPUT_PINS,
     PixelConfig,
     StateService,

@@ -18,7 +18,7 @@ INPUT_PINS = (17, 27, 22, 23)
 PIXEL_COUNT = 5
 POLL_INTERVAL = 1
 COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}\Z")
-LOGGER = logging.getLogger("gpio_neopixel")
+LOGGER = logging.getLogger("control_panel")
 
 
 @dataclass(frozen=True)
@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument(
         "--state-dir",
         type=Path,
-        default=Path("/var/lib/gpio-neopixel"),
+        default=Path("/var/lib/control-panel"),
         help="directory containing the .in and .out files",
     )
     args = parser.parse_args()

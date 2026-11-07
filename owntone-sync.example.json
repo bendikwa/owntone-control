@@ -1,0 +1,11 @@
+{
+  "owntone_url": "http://127.0.0.1:3689",
+  "state_dir": "/var/lib/control-panel",
+  "poll_interval": 2,
+  "sources": [
+    "Living Room",
+    "Kitchen",
+    "Bedroom",
+    "Office"
+  ]
+}

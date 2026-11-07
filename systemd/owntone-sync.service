@@ -1,0 +1,15 @@
+[Unit]
+Description=Mirror Owntone AirPlay outputs to control-panel LEDs
+After=network.target owntone.service
+
+[Service]
+Type=simple
+User=owntone
+Group=owntone
+WorkingDirectory=/opt/owntone-sync
+ExecStart=/usr/bin/python3 /opt/owntone-sync/owntone_sync.py --config /etc/owntone-sync/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
