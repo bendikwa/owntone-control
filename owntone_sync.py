@@ -143,8 +143,14 @@ class OwntoneApi:
         return outputs
 
     def select_output(self, output_id: str) -> None:
+        self.set_output_selected(output_id, True)
+
+    def deselect_output(self, output_id: str) -> None:
+        self.set_output_selected(output_id, False)
+
+    def set_output_selected(self, output_id: str, selected: bool) -> None:
         endpoint = f"/api/outputs/{urllib.parse.quote(output_id, safe='')}"
-        self._request("PUT", endpoint, {"selected": True})
+        self._request("PUT", endpoint, {"selected": selected})
 
 
 class OwntoneSync:
@@ -187,7 +193,22 @@ class OwntoneSync:
                 source_name,
                 "selected" if connected else "available but not selected",
             )
-            if not connected and (self.config.state_dir / f"{index}.in").exists():
+            switch_on = (self.config.state_dir / f"{index}.in").exists()
+            if connected and not switch_on:
+                try:
+                    LOGGER.debug(
+                        "Switch %s requests disconnection from %r", index, source_name
+                    )
+                    self.api.deselect_output(output["id"])
+                    connected = False
+                    LOGGER.info("Disconnected from AirPlay source %r", source_name)
+                except (OSError, ValueError) as error:
+                    LOGGER.error(
+                        "Could not disconnect AirPlay speaker %r: %s",
+                        source_name,
+                        error,
+                    )
+            elif not connected and switch_on:
                 try:
                     LOGGER.debug(
                         "Switch %s requests connection to %r", index, source_name

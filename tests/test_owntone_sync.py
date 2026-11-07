@@ -19,12 +19,16 @@ class FakeApi:
     def __init__(self, outputs):
         self.outputs = outputs
         self.selected = []
+        self.deselected = []
 
     def get_outputs(self):
         return self.outputs
 
     def select_output(self, output_id):
         self.selected.append(output_id)
+
+    def deselect_output(self, output_id):
+        self.deselected.append(output_id)
 
 
 class ConfigTests(unittest.TestCase):
@@ -96,6 +100,24 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(request.get_method(), "PUT")
         self.assertEqual(json.loads(request.data), {"selected": True})
+
+    def test_deselect_output_sets_selected_false(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def read(self):
+                return b""
+
+        with patch("owntone_sync.urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+            OwntoneApi("http://127.0.0.1:3689").deselect_output("speaker/1")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_method(), "PUT")
+        self.assertEqual(json.loads(request.data), {"selected": False})
 
 
 class SyncTests(unittest.TestCase):
@@ -177,6 +199,7 @@ class SyncTests(unittest.TestCase):
     def test_selected_source_is_green_and_unselected_source_is_orange(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
+            (state_dir / "1.in").touch()
             config = SyncConfig(
                 "http://127.0.0.1:3689", state_dir, 2.0, ("Connected", "Available")
             )
@@ -204,6 +227,30 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(connected["color"], CONNECTED_COLOR)
             self.assertEqual(available["color"], AVAILABLE_COLOR)
             self.assertEqual(api.selected, [])
+
+    def test_switch_off_disconnects_selected_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            config = SyncConfig(
+                "http://127.0.0.1:3689", state_dir, 2.0, ("Living Room",)
+            )
+            api = FakeApi(
+                [
+                    {
+                        "id": "speaker/1",
+                        "name": "Living Room",
+                        "type": "AirPlay 2",
+                        "selected": True,
+                    }
+                ]
+            )
+
+            OwntoneSync(config, api).sync_once()
+
+            self.assertEqual(api.deselected, ["speaker/1"])
+            led = json.loads((state_dir / "1.out").read_text(encoding="utf-8"))
+            self.assertTrue(led["on"])
+            self.assertEqual(led["color"], AVAILABLE_COLOR)
 
     def test_failed_connection_keeps_available_color(self):
         class FailingApi(FakeApi):
