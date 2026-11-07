@@ -68,29 +68,38 @@ def scaled_color(config: PixelConfig) -> tuple[int, int, int]:
     return tuple(round(channel * config.brightness) for channel in config.color)
 
 
-def owntone_service_is_running() -> bool | None:
+def service_is_running(service_name: str) -> bool | None:
     try:
         result = subprocess.run(
-            ("systemctl", "is-active", "--quiet", "owntone.service"),
+            ("systemctl", "is-active", "--quiet", service_name),
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=2,
         )
     except subprocess.TimeoutExpired:
-        LOGGER.error("Timed out checking Owntone service status")
+        LOGGER.error("Timed out checking %s status", service_name)
         return None
     except OSError as error:
-        LOGGER.error("Cannot check Owntone service status: %s", error)
+        LOGGER.error("Cannot check %s status: %s", service_name, error)
         return None
 
     if result.returncode in (0, 3, 4):
         return result.returncode == 0
     LOGGER.error(
-        "Unexpected exit status %s while checking Owntone service",
+        "Unexpected exit status %s while checking %s",
         result.returncode,
+        service_name,
     )
     return None
+
+
+def owntone_service_is_running() -> bool | None:
+    return service_is_running("owntone.service")
+
+
+def owntone_sync_service_is_running() -> bool | None:
+    return service_is_running("owntone-sync.service")
 
 
 def wifi_is_connected(net_dir: Path = Path("/sys/class/net")) -> bool | None:
@@ -182,10 +191,11 @@ class StateService:
 
     def sync_system_status(self) -> None:
         owntone_running = owntone_service_is_running()
-        if owntone_running is None:
+        owntone_sync_running = owntone_sync_service_is_running()
+        if owntone_running is None or owntone_sync_running is None:
             return
 
-        if not owntone_running:
+        if not owntone_running or not owntone_sync_running:
             on = True
             color = SYSTEM_PIXEL_RED
         else:

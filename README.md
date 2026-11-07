@@ -43,9 +43,9 @@ use another directory. The service creates it if needed.
 
 The control-panel service updates pixel 0 to show system status at brightness
 `0.1`: orange (`#FFA500`) when Owntone and Wi-Fi are connected, blue (`#000080`)
-when Owntone is running but Wi-Fi is not connected, and red (`#800000`) when
-Owntone is not running. Wi-Fi status is read from the wireless network
-interface's Linux carrier state.
+when both Owntone services are running but Wi-Fi is not connected, and red
+(`#800000`) when either Owntone or owntone-sync is not running. Wi-Fi status is
+read from the wireless network interface's Linux carrier state.
 
 Each `.out` file contains a JSON object with all three fields:
 

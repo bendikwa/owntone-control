@@ -11,6 +11,7 @@ from control_panel import (
     StateService,
     _GPIOInput,
     owntone_service_is_running,
+    owntone_sync_service_is_running,
     parse_pixel_config,
     run_service,
     scaled_color,
@@ -50,6 +51,18 @@ class SystemStatusDetectionTests(unittest.TestCase):
         self.assertEqual(
             run.call_args.args[0],
             ("systemctl", "is-active", "--quiet", "owntone.service"),
+        )
+
+    def test_owntone_sync_service_status_uses_systemctl(self):
+        with patch(
+            "control_panel.subprocess.run",
+            return_value=types.SimpleNamespace(returncode=0),
+        ) as run:
+            self.assertTrue(owntone_sync_service_is_running())
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ("systemctl", "is-active", "--quiet", "owntone-sync.service"),
         )
 
     def test_wifi_status_uses_wireless_interface_carrier(self):
@@ -163,6 +176,7 @@ class StateServiceTests(unittest.TestCase):
 
             with (
                 patch("control_panel.owntone_service_is_running", return_value=True),
+                patch("control_panel.owntone_sync_service_is_running", return_value=True),
                 patch("control_panel.wifi_is_connected", return_value=True),
             ):
                 service.sync_system_status()
@@ -182,6 +196,7 @@ class StateServiceTests(unittest.TestCase):
 
             with (
                 patch("control_panel.owntone_service_is_running", return_value=True),
+                patch("control_panel.owntone_sync_service_is_running", return_value=True),
                 patch("control_panel.wifi_is_connected", return_value=False),
             ):
                 service.sync_system_status()
@@ -200,9 +215,34 @@ class StateServiceTests(unittest.TestCase):
                 state_dir, [FakeButton(False)] * 4, FakeStrip(), color
             )
 
-            with patch("control_panel.owntone_service_is_running", return_value=False):
+            with (
+                patch("control_panel.owntone_service_is_running", return_value=False),
+                patch("control_panel.owntone_sync_service_is_running", return_value=True),
+                patch("control_panel.wifi_is_connected") as wifi_status,
+            ):
                 service.sync_system_status()
 
+            wifi_status.assert_not_called()
+            self.assertEqual(
+                parse_pixel_config((state_dir / "0.out").read_text(encoding="utf-8")),
+                PixelConfig(True, (128, 0, 0), 0.1),
+            )
+
+    def test_system_pixel_is_red_when_owntone_sync_is_not_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            service = StateService(
+                state_dir, [FakeButton(False)] * 4, FakeStrip(), color
+            )
+
+            with (
+                patch("control_panel.owntone_service_is_running", return_value=True),
+                patch("control_panel.owntone_sync_service_is_running", return_value=False),
+                patch("control_panel.wifi_is_connected") as wifi_status,
+            ):
+                service.sync_system_status()
+
+            wifi_status.assert_not_called()
             self.assertEqual(
                 parse_pixel_config((state_dir / "0.out").read_text(encoding="utf-8")),
                 PixelConfig(True, (128, 0, 0), 0.1),
