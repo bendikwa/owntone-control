@@ -38,6 +38,30 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.api_url, "http://127.0.0.1:3689")
         self.assertEqual(config.sources, ("Living Room",))
         self.assertEqual(config.poll_interval, 2.0)
+        self.assertEqual(config.log_level, "INFO")
+
+    def test_loads_log_level_case_insensitively(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(
+                json.dumps({"sources": ["Living Room"], "log_level": "debug"}),
+                encoding="utf-8",
+            )
+
+            config = load_config(path)
+
+        self.assertEqual(config.log_level, "DEBUG")
+
+    def test_rejects_invalid_log_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(
+                json.dumps({"sources": ["Living Room"], "log_level": "verbose"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "log_level"):
+                load_config(path)
 
     def test_rejects_more_than_four_sources_and_duplicates(self):
         for sources in (
@@ -75,6 +99,31 @@ class ApiTests(unittest.TestCase):
 
 
 class SyncTests(unittest.TestCase):
+    def test_logs_sync_lifecycle_and_source_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            config = SyncConfig(
+                "http://127.0.0.1:3689", state_dir, 2.0, ("Living Room",)
+            )
+            api = FakeApi(
+                [
+                    {
+                        "id": "1",
+                        "name": "Living Room",
+                        "type": "AirPlay",
+                        "selected": True,
+                    }
+                ]
+            )
+
+            with self.assertLogs("owntone_sync", level="DEBUG") as captured:
+                OwntoneSync(config, api).sync_once()
+
+        messages = "\n".join(captured.output)
+        self.assertIn("Starting Owntone sync", messages)
+        self.assertIn("AirPlay source 'Living Room' is selected", messages)
+        self.assertIn("Owntone sync cycle finished", messages)
+
     def test_switch_connects_available_source_and_leds_show_each_state(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
@@ -97,7 +146,7 @@ class SyncTests(unittest.TestCase):
                     {
                         "id": "speaker-2",
                         "name": "Kitchen",
-                        "type": "AirPlay",
+                        "type": "AirPlay 2",
                         "selected": False,
                     },
                     {

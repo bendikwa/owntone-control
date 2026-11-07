@@ -32,6 +32,7 @@ class SyncConfig:
     state_dir: Path
     poll_interval: float
     sources: tuple[str, ...]
+    log_level: str = "INFO"
 
 
 def load_config(path: Path) -> SyncConfig:
@@ -78,11 +79,24 @@ def load_config(path: Path) -> SyncConfig:
     if len(set(sources)) != len(sources):
         raise ValueError("speaker names in 'sources' must be unique")
 
+    log_level = data.get("log_level", "INFO")
+    if not isinstance(log_level, str) or log_level.upper() not in {
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL",
+    }:
+        raise ValueError(
+            "'log_level' must be one of DEBUG, INFO, WARNING, ERROR, or CRITICAL"
+        )
+
     return SyncConfig(
         api_url=api_url,
         state_dir=Path(state_dir_value),
         poll_interval=float(poll_interval),
         sources=tuple(sources),
+        log_level=log_level.upper(),
     )
 
 
@@ -139,12 +153,15 @@ class OwntoneSync:
         self.api = api
 
     def sync_once(self) -> None:
+        LOGGER.info("Starting Owntone sync")
         outputs = self.api.get_outputs()
+        LOGGER.debug("Fetched %d Owntone outputs", len(outputs))
         for index, source_name in enumerate(self.config.sources, start=1):
             matches = [
                 output
                 for output in outputs
-                if output["type"] == "AirPlay" and output["name"] == source_name
+                if output["type"] in {"AirPlay", "AirPlay 2"}
+                and output["name"] == source_name
             ]
             if len(matches) > 1:
                 LOGGER.error(
@@ -155,15 +172,29 @@ class OwntoneSync:
                 self._write_led(index, on=False, color=AVAILABLE_COLOR)
                 continue
             if not matches:
+                LOGGER.debug(
+                    "AirPlay source %r is unavailable; turning LED %s off",
+                    source_name,
+                    index,
+                )
                 self._write_led(index, on=False, color=AVAILABLE_COLOR)
                 continue
 
             output = matches[0]
             connected = output["selected"]
+            LOGGER.debug(
+                "AirPlay source %r is %s",
+                source_name,
+                "selected" if connected else "available but not selected",
+            )
             if not connected and (self.config.state_dir / f"{index}.in").exists():
                 try:
+                    LOGGER.debug(
+                        "Switch %s requests connection to %r", index, source_name
+                    )
                     self.api.select_output(output["id"])
                     connected = True
+                    LOGGER.info("Connected to AirPlay source %r", source_name)
                 except (OSError, ValueError) as error:
                     LOGGER.error(
                         "Could not connect AirPlay speaker %r: %s", source_name, error
@@ -177,6 +208,7 @@ class OwntoneSync:
 
         for index in range(len(self.config.sources) + 1, 5):
             self._write_led(index, on=False, color=AVAILABLE_COLOR)
+        LOGGER.info("Owntone sync cycle finished")
 
     def _write_led(self, index: int, *, on: bool, color: str) -> None:
         path = self.config.state_dir / f"{index}.out"
@@ -186,6 +218,7 @@ class OwntoneSync:
         ) + "\n"
         try:
             if path.read_text(encoding="utf-8") == content:
+                LOGGER.debug("LED %s state is unchanged", index)
                 return
         except FileNotFoundError:
             pass
@@ -202,6 +235,7 @@ class OwntoneSync:
                 temporary_path = Path(temporary.name)
                 temporary.write(content)
             os.replace(temporary_path, path)
+            LOGGER.debug("Updated LED %s: on=%s color=%s", index, on, color)
         finally:
             if temporary_path is not None:
                 try:
@@ -214,7 +248,7 @@ class OwntoneSync:
             try:
                 self.sync_once()
             except (OSError, ValueError) as error:
-                LOGGER.error("Owntone sync failed: %s", error)
+                LOGGER.exception("Owntone sync failed: %s", error)
             time.sleep(self.config.poll_interval)
 
 
@@ -227,11 +261,11 @@ def main() -> None:
         help="path to the local JSON configuration file",
     )
     args = parser.parse_args()
+    config = load_config(args.config)
     logging.basicConfig(
-        level=logging.INFO,
+        level=config.log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    config = load_config(args.config)
     config.state_dir.mkdir(parents=True, exist_ok=True)
     OwntoneSync(config, OwntoneApi(config.api_url)).run()
 

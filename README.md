@@ -129,7 +129,10 @@ Copy [owntone-sync.example.json](./owntone-sync.example.json) to
 the AirPlay output names shown by Owntone. `owntone_url`, `state_dir`, and
 `poll_interval` can also be set in this JSON file. The default API URL is
 `http://127.0.0.1:3689`; the default state directory is
-`/var/lib/control-panel`.
+`/var/lib/control-panel`. Set `log_level` to `DEBUG`, `INFO`, `WARNING`,
+`ERROR`, or `CRITICAL` to control service logging; it defaults to `INFO`.
+Use `DEBUG` to see per-sync source status and LED-file updates, then inspect
+the output with `sudo journalctl -u owntone-sync.service -f`.
 
 Install the service and its example systemd unit:
 
