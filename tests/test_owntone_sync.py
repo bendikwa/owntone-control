@@ -1,4 +1,5 @@
 import json
+import signal
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from owntone_sync import (
     OwntoneSync,
     SyncConfig,
     load_config,
+    main,
 )
 
 
@@ -121,6 +123,85 @@ class ApiTests(unittest.TestCase):
 
 
 class SyncTests(unittest.TestCase):
+    def test_run_turns_off_all_leds_when_interrupted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            config = SyncConfig(
+                "http://127.0.0.1:3689",
+                state_dir,
+                2.0,
+                ("Living Room",),
+            )
+            for index in range(1, 5):
+                (state_dir / f"{index}.out").write_text(
+                    json.dumps(
+                        {
+                            "on": True,
+                            "color": CONNECTED_COLOR,
+                            "brightness": BRIGHTNESS,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            sync = OwntoneSync(config, FakeApi([]))
+
+            with (
+                patch.object(sync, "sync_once", side_effect=KeyboardInterrupt),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                sync.run()
+
+            for index in range(1, 5):
+                led = json.loads(
+                    (state_dir / f"{index}.out").read_text(encoding="utf-8")
+                )
+                self.assertFalse(led["on"])
+                self.assertEqual(led["color"], AVAILABLE_COLOR)
+                self.assertEqual(led["brightness"], BRIGHTNESS)
+
+    def test_sigterm_runs_shutdown_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            config = SyncConfig(
+                "http://127.0.0.1:3689",
+                state_dir,
+                2.0,
+                ("Living Room",),
+            )
+            signal_handlers = []
+            for index in range(1, 5):
+                (state_dir / f"{index}.out").write_text(
+                    json.dumps(
+                        {
+                            "on": True,
+                            "color": CONNECTED_COLOR,
+                            "brightness": BRIGHTNESS,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            def terminate_sync():
+                signal_handlers[0][1](signal.SIGTERM, None)
+
+            def capture_signal(sig, handler):
+                signal_handlers.append((sig, handler))
+
+            with (
+                patch("sys.argv", ["owntone_sync.py", "--config", "unused"]),
+                patch("owntone_sync.load_config", return_value=config),
+                patch("owntone_sync.signal.signal", side_effect=capture_signal),
+                patch.object(OwntoneSync, "sync_once", side_effect=terminate_sync),
+            ):
+                main()
+
+            self.assertEqual(signal_handlers[0][0], signal.SIGTERM)
+            for index in range(1, 5):
+                led = json.loads(
+                    (state_dir / f"{index}.out").read_text(encoding="utf-8")
+                )
+                self.assertFalse(led["on"])
+
     def test_logs_sync_lifecycle_and_source_status(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)

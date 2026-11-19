@@ -8,12 +8,14 @@ import json
 import logging
 import math
 import os
+import signal
 import tempfile
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 
@@ -265,12 +267,26 @@ class OwntoneSync:
                     pass
 
     def run(self) -> None:
-        while True:
-            try:
-                self.sync_once()
-            except (OSError, ValueError) as error:
-                LOGGER.exception("Owntone sync failed: %s", error)
-            time.sleep(self.config.poll_interval)
+        try:
+            while True:
+                try:
+                    self.sync_once()
+                except (OSError, ValueError) as error:
+                    LOGGER.exception("Owntone sync failed: %s", error)
+                time.sleep(self.config.poll_interval)
+        finally:
+            write_error: OSError | None = None
+            for index in range(1, 5):
+                try:
+                    self._write_led(index, on=False, color=AVAILABLE_COLOR)
+                except OSError as error:
+                    LOGGER.error(
+                        "Cannot turn off LED %s during shutdown: %s", index, error
+                    )
+                    if write_error is None:
+                        write_error = error
+            if write_error is not None:
+                raise write_error
 
 
 def main() -> None:
@@ -288,7 +304,16 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     config.state_dir.mkdir(parents=True, exist_ok=True)
-    OwntoneSync(config, OwntoneApi(config.api_url)).run()
+    sync = OwntoneSync(config, OwntoneApi(config.api_url))
+
+    def handle_sigterm(_signum: int, _frame: FrameType | None) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    try:
+        sync.run()
+    except KeyboardInterrupt:
+        LOGGER.info("Stopping")
 
 
 if __name__ == "__main__":

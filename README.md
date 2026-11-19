@@ -106,7 +106,6 @@ sudo systemctl restart control-panel.service
 
 Switch inputs are read by polling `RPi.GPIO`; the service does not use a
 gpiozero pin factory or configure GPIO edge detection.
-The service turns all pixels off on shutdown.
 
 For development, the hardware-independent tests run with:
 
@@ -118,7 +117,8 @@ python3 -m unittest discover -s tests
 
 `owntone_sync.py` is an independent service that polls Owntone's JSON API and
 updates the `1.out` through `4.out` LED state files in the control-panel state
-directory. It matches configured names against available `AirPlay` outputs:
+directory. It turns those LEDs off on shutdown. It matches configured names
+against available `AirPlay` outputs:
 
 * Available but not selected: orange (`#FFA500`) at brightness `0.1`.
 * Selected in Owntone: green (`#008000`) at brightness `0.1`.
