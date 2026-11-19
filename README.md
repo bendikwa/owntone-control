@@ -106,7 +106,8 @@ sudo systemctl restart control-panel.service
 
 Switch inputs are read by polling `RPi.GPIO`; the service does not use a
 gpiozero pin factory or configure GPIO edge detection.
-The service turns all pixels off on shutdown.
+On shutdown, the service turns off all pixels and sets `"on": false` in every
+`0.out` through `4.out` status file.
 
 For development, the hardware-independent tests run with:
 
