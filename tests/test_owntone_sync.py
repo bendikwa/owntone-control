@@ -123,6 +123,65 @@ class ApiTests(unittest.TestCase):
 
 
 class SyncTests(unittest.TestCase):
+    def test_run_turns_off_stale_leds_before_checking_owntone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            config = SyncConfig(
+                "http://127.0.0.1:3689",
+                state_dir,
+                2.0,
+                ("Living Room",),
+            )
+            for index in range(1, 5):
+                (state_dir / f"{index}.out").write_text(
+                    json.dumps(
+                        {
+                            "on": True,
+                            "color": CONNECTED_COLOR,
+                            "brightness": BRIGHTNESS,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            class StartupCheckingApi(FakeApi):
+                def get_outputs(self):
+                    for index in range(1, 5):
+                        status = json.loads(
+                            (state_dir / f"{index}.out").read_text(encoding="utf-8")
+                        )
+                        if status["on"]:
+                            raise AssertionError(
+                                f"LED {index} was on before the startup check"
+                            )
+                    return [
+                        {
+                            "id": "1",
+                            "name": "Living Room",
+                            "type": "AirPlay",
+                            "selected": True,
+                        }
+                    ]
+
+            sync = OwntoneSync(config, StartupCheckingApi([]))
+            observed_after_sync = []
+
+            def stop_after_sync(_interval):
+                observed_after_sync.append(
+                    json.loads(
+                        (state_dir / "1.out").read_text(encoding="utf-8")
+                    )["on"]
+                )
+                raise KeyboardInterrupt
+
+            with (
+                patch("owntone_sync.time.sleep", side_effect=stop_after_sync),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                sync.run()
+
+            self.assertEqual(observed_after_sync, [True])
+
     def test_run_turns_off_all_leds_when_interrupted(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)

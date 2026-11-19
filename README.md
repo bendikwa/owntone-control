@@ -117,8 +117,9 @@ python3 -m unittest discover -s tests
 
 `owntone_sync.py` is an independent service that polls Owntone's JSON API and
 updates the `1.out` through `4.out` LED state files in the control-panel state
-directory. It turns those LEDs off on shutdown. It matches configured names
-against available `AirPlay` outputs:
+directory. At startup it turns those LEDs off before checking Owntone and
+writing current statuses; it also turns them off on shutdown. It matches
+configured names against available `AirPlay` outputs:
 
 * Available but not selected: orange (`#FFA500`) at brightness `0.1`.
 * Selected in Owntone: green (`#008000`) at brightness `0.1`.

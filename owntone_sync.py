@@ -268,6 +268,7 @@ class OwntoneSync:
 
     def run(self) -> None:
         try:
+            self._turn_off_leds()
             while True:
                 try:
                     self.sync_once()
@@ -275,18 +276,19 @@ class OwntoneSync:
                     LOGGER.exception("Owntone sync failed: %s", error)
                 time.sleep(self.config.poll_interval)
         finally:
-            write_error: OSError | None = None
-            for index in range(1, 5):
-                try:
-                    self._write_led(index, on=False, color=AVAILABLE_COLOR)
-                except OSError as error:
-                    LOGGER.error(
-                        "Cannot turn off LED %s during shutdown: %s", index, error
-                    )
-                    if write_error is None:
-                        write_error = error
-            if write_error is not None:
-                raise write_error
+            self._turn_off_leds()
+
+    def _turn_off_leds(self) -> None:
+        write_error: OSError | None = None
+        for index in range(1, 5):
+            try:
+                self._write_led(index, on=False, color=AVAILABLE_COLOR)
+            except OSError as error:
+                LOGGER.error("Cannot turn off LED %s: %s", index, error)
+                if write_error is None:
+                    write_error = error
+        if write_error is not None:
+            raise write_error
 
 
 def main() -> None:
