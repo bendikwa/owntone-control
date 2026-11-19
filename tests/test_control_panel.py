@@ -154,20 +154,6 @@ class StateServiceTests(unittest.TestCase):
 
             self.assertEqual(strip.colors, {index: (0, 0, 0) for index in range(5)})
 
-    def test_shutdown_creates_off_status_files_when_missing(self):
-        with tempfile.TemporaryDirectory() as directory:
-            service = StateService(
-                Path(directory), [FakeButton(False)] * 4, FakeStrip(), color
-            )
-
-            service.turn_off_pixels()
-
-            for index in range(5):
-                status = parse_pixel_config(
-                    (Path(directory) / f"{index}.out").read_text(encoding="utf-8")
-                )
-                self.assertFalse(status.on)
-
     def test_output_file_sets_matching_pixel(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
@@ -301,38 +287,22 @@ class RunServiceTests(unittest.TestCase):
         def request_sigterm():
             signal_handlers[0](signal.SIGTERM, None)
 
-        with tempfile.TemporaryDirectory() as directory:
-            state_dir = Path(directory)
-            for index in range(5):
-                (state_dir / f"{index}.out").write_text(
-                    '{"on":true,"color":"#33AAFF","brightness":0.4}',
-                    encoding="utf-8",
-                )
-
-            with (
-                patch.dict(
-                    sys.modules,
-                    {
-                        "RPi": rpi,
-                        "RPi.GPIO": gpio,
-                        "rpi_ws281x": ws281x,
-                    },
-                ),
-                patch(
-                    "control_panel.signal.signal",
-                    side_effect=lambda _sig, handler: signal_handlers.append(handler),
-                ),
-                patch.object(StateService, "run", side_effect=request_sigterm),
-            ):
-                run_service(state_dir)
-
-            for index in range(5):
-                status = parse_pixel_config(
-                    (state_dir / f"{index}.out").read_text(encoding="utf-8")
-                )
-                self.assertFalse(status.on)
-                self.assertEqual(status.color, (51, 170, 255))
-                self.assertEqual(status.brightness, 0.4)
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "RPi": rpi,
+                    "RPi.GPIO": gpio,
+                    "rpi_ws281x": ws281x,
+                },
+            ),
+            patch(
+                "control_panel.signal.signal",
+                side_effect=lambda _sig, handler: signal_handlers.append(handler),
+            ),
+            patch.object(StateService, "run", side_effect=request_sigterm),
+        ):
+            run_service(Path("."))
 
         self.assertEqual(len(signal_handlers), 1)
         self.assertEqual(strips[0].colors, {index: (0, 0, 0) for index in range(5)})

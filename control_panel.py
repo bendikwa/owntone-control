@@ -131,27 +131,6 @@ def wifi_is_connected(net_dir: Path = Path("/sys/class/net")) -> bool | None:
     return False
 
 
-def write_status_file(path: Path, content: str) -> None:
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(content)
-        os.replace(temporary_path, path)
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
-
-
 class StateService:
     def __init__(
         self,
@@ -243,7 +222,24 @@ class StateService:
         except FileNotFoundError:
             pass
 
-        write_status_file(path, content)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.state_dir,
+                prefix=".0.out.",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
 
     def run(self) -> None:
         while True:
@@ -256,34 +252,6 @@ class StateService:
         for index in range(PIXEL_COUNT):
             self.strip.setPixelColor(index, self.color_factory(0, 0, 0))
         self.strip.show()
-        write_error: OSError | None = None
-        for index in range(PIXEL_COUNT):
-            path = self.state_dir / f"{index}.out"
-            try:
-                config = parse_pixel_config(path.read_text(encoding="utf-8"))
-            except FileNotFoundError:
-                config = PixelConfig(False, (0, 0, 0), 0.0)
-            except (OSError, UnicodeError, ValueError) as error:
-                LOGGER.error("Cannot read %s while shutting down: %s", path, error)
-                config = PixelConfig(False, (0, 0, 0), 0.0)
-
-            red, green, blue = config.color
-            content = json.dumps(
-                {
-                    "on": False,
-                    "color": f"#{red:02X}{green:02X}{blue:02X}",
-                    "brightness": config.brightness,
-                },
-                separators=(",", ":"),
-            ) + "\n"
-            try:
-                write_status_file(path, content)
-            except OSError as error:
-                LOGGER.error("Cannot write shutdown status to %s: %s", path, error)
-                if write_error is None:
-                    write_error = error
-        if write_error is not None:
-            raise write_error
 
 
 _UNREAD = object()
